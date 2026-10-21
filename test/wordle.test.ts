@@ -11,43 +11,92 @@ import { matchGuess } from '../src/wordle';
 // (invariant, algebraic, metamorphic, differential, or conditional)
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const SMALL = 'ABC';
 
-// Step 1: a generator for five-letter uppercase words.
-// const word = ...
+const wordFrom = (letters: string) =>
+  fc
+    .array(fc.constantFrom(...letters), { minLength: 5, maxLength: 5 })
+    .map(cs => cs.join(''));
 
-const word_From = (letters: string) => {
-  return fc.array(fc.constantFrom(...letters), { minLength: 5, maxLength: 5 });
-};
+const word = wordFrom(ALPHABET);       
+const smallWord = wordFrom(SMALL);    
+// mix the two 
+const anyWord = fc.oneof(word, smallWord);
 
-const word = word_From(ALPHABET);
+const count = (w: string, letter: string) =>
+  [...w].filter(c => c === letter).length;
 
 describe('matchGuess', () => {
+  // Pattern: invariant. The result always has exactly five colors.
   it('returns exactly five colors', () => {
     fc.assert(
-      fc.property(word, word, (secret, guess) => {
+      fc.property(anyWord, anyWord, (secret, guess) => {
         expect(matchGuess(secret, guess)).toHaveLength(5);
       })
     );
-
-
-
-
-
   });
-  it.todo('only uses the colors G, Y, B');
-  it.todo('guessing the secret gives all greens' , () => {
-    fc.assert(fc.property(word, w => {
-      expect(matchGuess(w, w)).toEqual(['G', 'G', 'G', 'G', 'G']);
-    }));
+
+  // Pattern: invariant. Every color is one of G, Y, or B.
+  it('only uses the colors G, Y, B', () => {
+    fc.assert(
+      fc.property(anyWord, anyWord, (secret, guess) => {
+        for (const c of matchGuess(secret, guess)) {
+          expect(['G', 'Y', 'B']).toContain(c);
+        }
+      })
+    );
   });
-  it.todo('never credits a letter more times than the secret contains it', () => {
-    fc.assert(fc.property(word, word, (secret, guess) => {
-      const result = matchGuess(secret, guess);
-      for (const letter of new Set(guess)) {
-        const credited = [...guess].filter((c, i) => c === letter && result[i] != 'B').length;
-        const inSecret = [...secret].filter(c => c === letter).length;
-        expect(credited).toBeLessThanOrEqual(inSecret);
+
+ // Pattern: conditional. If guess and secret share no letters, every color is black.
+it('gives  blacks when the words share no letters', () => {
+  fc.assert(
+    fc.property(
+      wordFrom('ABCDEFGHIJKLM'),
+      wordFrom('NOPQRSTUVWXYZ'),
+      (secret, guess) => {
+        expect(matchGuess(secret, guess)).toEqual(['B', 'B', 'B', 'B', 'B']);
       }
-    }));
+    )
+  );
+});
+
+  // Pattern: invariant. A position is green exactly when the letters match there.
+  it('is green exactly where guess and secret agree', () => {
+    fc.assert(
+      fc.property(anyWord, anyWord, (secret, guess) => {
+        const result = matchGuess(secret, guess);
+        for (let i = 0; i < 5; i++) {
+          expect(result[i] === 'G').toBe(guess[i] === secret[i]);
+        }
+      })
+    );
+  });
+
+  // Pattern: conditional. If the guess equals the secret, every color is green.
+  it('guessing the secret gives all greens', () => {
+    fc.assert(
+      fc.property(anyWord, w => {
+        expect(matchGuess(w, w)).toEqual(['G', 'G', 'G', 'G', 'G']);
+      })
+    );
+  });
+
+  // Pattern: metamorphic. Reordering positions the same way in both words
+  // reorders the colors the same way.
+  it('commutes with applying the same position permutation to both words', () => {
+    fc.assert(
+      fc.property(
+        anyWord,
+        anyWord,
+        fc.shuffledSubarray([0, 1, 2, 3, 4], { minLength: 5, maxLength: 5 }),
+        (s, g, perm) => {
+          const permute = <T,>(xs: ArrayLike<T>) => perm.map(i => xs[i]);
+          const ps = permute([...s]).join('');
+          const pg = permute([...g]).join('');
+          const base = matchGuess(s, g).map(c => c === 'G');
+          expect(matchGuess(ps, pg).map(c => c === 'G')).toEqual(permute(base));
+        }
+      )
+    );
   });
 });
