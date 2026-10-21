@@ -10,15 +10,38 @@ import { mergeIntervals, type Interval } from '../src/intervals';
 //   // Pattern: invariant. The output is sorted.
 // (invariant, algebraic, metamorphic, differential, or conditional)
 
-// A first attempt at a generator. It has a problem: run the tests and read
-// the counterexample.
-
 // interval generator that works on a small range so that testing is more effective.
 const point = fc.integer({ min: -10, max: 10 });
 const interval: fc.Arbitrary<Interval> = fc
   .tuple(point, point)
   .map(([a, b]): Interval => (a <= b ? [a, b] : [b, a]));
-const intervalList = fc.array(interval, { maxLength: 12 });
+const randomList = fc.array(interval, { maxLength: 12 });
+
+// Chained generator each -  interval starts exactly at the previous end (touch),
+// after a gap, or inside the previous interval (overlap) 
+const chainedList: fc.Arbitrary<Interval[]> = fc
+  .array(
+    fc.tuple(
+      fc.constantFrom('touch', 'gap', 'overlap'),
+      fc.integer({ min: 0, max: 4 }),
+      fc.integer({ min: 0, max: 4 })
+    ),
+    { maxLength: 12 }
+  )
+  .map(steps => {
+    const out: Interval[] = [];
+    let prevEnd = 0;
+    for (const [kind, offset, len] of steps) {
+      const start =
+        kind === 'touch' ? prevEnd : kind === 'gap' ? prevEnd + 1 + offset : prevEnd - offset;
+      out.push([start, start + len]);
+      prevEnd = start + len;
+    }
+    return out;
+  });
+
+// Mix of fully random lists and chained lists.
+const intervalList = fc.oneof(randomList, chainedList);
 
 // Targeted generator for the conditional test: sorted intervals with a gap of
 // at least 1 between them
@@ -55,8 +78,9 @@ describe('mergeIntervals', () => {
         expect(uncovered).toEqual([]);
       })
     );
-  });         
-  // pattern: invariant. output length is less than or equal to input length
+  });
+
+  // Pattern: invariant. The output length is less than or equal to the input length.
   it('output length is less than or equal to the input length', () => {
     fc.assert(fc.property(intervalList, xs => {
       const out = mergeIntervals(xs);
@@ -64,7 +88,7 @@ describe('mergeIntervals', () => {
     }))
   });
 
-    // Pattern: conditional. If the input is already sorted with no overlapping or touching intervals, the result equals the input but is a new list.
+  // Pattern: conditional. If the input is already sorted with no overlapping or touching intervals, the result equals the input but is a new list.
   it('leaves already-disjoint input unchanged, as a new list', () => {
     fc.assert(
       fc.property(disjointSortedList, xs => {
@@ -110,6 +134,4 @@ describe('mergeIntervals', () => {
       })
     );
   });
-
 });
-
